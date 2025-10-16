@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "rand.h"
 
 struct cpu cpus[NCPU];
 
@@ -19,6 +20,9 @@ extern void forkret(void);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
+
+
+
 
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
@@ -145,6 +149,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  
+  p->priority= (rand() % 100) + 1;
 
   return p;
 }
@@ -424,42 +430,41 @@ kwait(uint64 addr)
 void
 scheduler(void)
 {
-  struct proc *p;
-  struct cpu *c = mycpu();
+    struct proc *p;
+    struct cpu *c = mycpu();
+    c->proc = 0;
 
-  c->proc = 0;
-  for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
-    intr_on();
-    intr_off();
+    for(;;){
+        // Enable interrupts on this CPU.
+        intr_on();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+        struct proc *highest_priority_proc = 0;
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
-      }
-      release(&p->lock);
+        // Scan the process table.
+        for(p = proc; p < &proc[NPROC]; p++){
+            acquire(&p->lock);
+            if(p->state == RUNNABLE){
+                if(!highest_priority_proc || p->priority < highest_priority_proc->priority){
+                    if(highest_priority_proc)
+                        release(&highest_priority_proc->lock);
+                    highest_priority_proc = p;
+                } else {
+                    release(&p->lock);
+                }
+            } else {
+                release(&p->lock);
+            }
+        }
+
+        if(highest_priority_proc){
+            // Run the selected process.
+            highest_priority_proc->state = RUNNING;
+            c->proc = highest_priority_proc;
+            swtch(&c->context, &highest_priority_proc->context);
+            c->proc = 0;
+            release(&highest_priority_proc->lock);
+        }
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
-    }
-  }
 }
 
 // Switch to scheduler.  Must hold only p->lock
@@ -688,3 +693,54 @@ procdump(void)
     printf("\n");
   }
 }
+
+
+
+/*
+
+Process Management Tasks
+
+Explore existing syscalls:
+
+fork(), exec(), wait(), exit().
+
+Observe zombie and orphan processes.
+
+Add new syscalls:
+
+getppid() – return parent PID. ✅ Done.
+
+setpriority(int) – set process priority.
+
+getpriority() – get process priority.
+
+listprocs() – list all running processes.
+
+Modify scheduler:
+
+Implement priority scheduling.
+
+Implement multi-level feedback queue (MLFQ).
+
+Process table operations:
+
+Kill all child processes of a given PID.
+
+Track process states (RUNNING, SLEEPING, ZOMBIE, RUNNABLE).
+
+Signals / notifications (advanced):
+
+Extend kill(pid) to send custom messages.
+
+Notify parent when child exits with custom info.
+
+Test and measure:
+
+Create user programs to test fork chains.
+
+Measure turnaround and waiting times with scheduling changes.
+
+
+
+
+*/

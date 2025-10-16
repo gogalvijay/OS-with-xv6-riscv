@@ -3,7 +3,7 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
-
+#include "rand.h"
 volatile static int started = 0;
 
 // start() jumps here in supervisor mode on all CPUs.
@@ -42,4 +42,5 @@ main()
   }
 
   scheduler();        
+  srand(12345);
 }
